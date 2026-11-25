@@ -1,0 +1,62 @@
+--- Smoke tests for the `http_rfc` wire codec (`src/index.hnl`) —
+--- pure handl over `str`/`bytes`/`char`/`hash_map`/`obj`/`type`.
+
+from "./index" import * as h
+from "bytes" import * as bytes
+
+-- pure helpers ---------------------------------------------------------
+
+test_alen := assert h.alen([1, 2, 3]) == 3
+
+test_alen_empty := assert h.alen([]) == 0
+
+test_nat_of := assert h.nat_of("42") == 42
+
+test_nat_of_padded := assert h.nat_of("007") == 7
+
+test_reason_200 := assert h.reason(200) == "OK"
+
+test_reason_404 := assert h.reason(404) == "Not Found"
+
+test_split_target_path_only := assert h.split_target("/p") == { path: "/p", query: "" }
+
+test_split_target_query := assert h.split_target("/p?q=1") == { path: "/p", query: "q=1" }
+
+test_find_head_end := assert h.find_head_end(bytes.utf8_encode("A\r\n\r\n")) == 1
+
+-- head parsing ---------------------------------------------------------
+
+test_parse_head := assert h.parse_head("GET /a?x=1 HTTP/1.1\r\nHost: h") ==
+  { method: "GET", target: "/a?x=1", version: "HTTP/1.1", headers: { host: "h" } }
+
+-- chunked bodies --------------------------------------------------------
+
+test_chunked := do {
+  r := h.try_decode_chunked(bytes.utf8_encode("4\r\nWiki\r\n0\r\n\r\n"), 0)
+  assert r.end == 14 && bytes.utf8_decode(r.body) == "Wiki"
+}
+
+-- request parsing -------------------------------------------------------
+
+test_try_parse_request := do {
+  buf := bytes.utf8_encode("GET /a?x=1 HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc")
+  r := h.try_parse_request(buf)
+  q := r.req
+  assert r.consumed == 54 && q.method == "GET" && q.path == "/a" &&
+    q.query == "x=1" && q.version == "HTTP/1.1" && q.body == "abc" &&
+    q.headers.host == "h" && q.headers["content-length"] == "3"
+}
+
+-- response serialization -------------------------------------------------
+
+test_serialize_response := do {
+  resp := { status: 200, headers: { "content-type": "text/plain" }, body: "hi" }
+  assert bytes.utf8_decode(h.serialize_response(resp, false)) ==
+    "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-length: 2\r\ncontent-type: text/plain\r\n\r\nhi"
+}
+
+test_serialize_response_head_only := do {
+  resp := { status: 200, headers: { "content-type": "text/plain" }, body: "hi" }
+  assert bytes.utf8_decode(h.serialize_response(resp, true)) ==
+    "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-length: 2\r\ncontent-type: text/plain\r\n\r\n"
+}
